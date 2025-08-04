@@ -41,11 +41,19 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 app = FastAPI(title="Face Recognition API", description="API for face recognition login and registration.")
 
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],  # or specify domains
+#     allow_credentials=True,
+#     allow_methods=["*"],  # or ["DELETE", "OPTIONS"]
+#     allow_headers=["*"],
+# )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or specify domains
-    allow_credentials=True,
-    allow_methods=["*"],  # or ["DELETE", "OPTIONS"]
+    allow_origins=["*"],
+    allow_credentials=False,  # must be False to allow "*" as origin
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -396,7 +404,7 @@ async def login(
 async def clear_all_data(db: Session = Depends(get_db)):
     """
     DEBUG/ADMIN ONLY: Clears all face embedding data from the database and resets the FAISS index.
-    User records are NOT deleted, only their embeddings are cleared.
+    User records are NOT deleted, only their embeddings ar  e cleared.
     NOT FOR PRODUCTION USE WITHOUT CAREFUL SECURITY CONSIDERATIONS.
     """
     global GLOBAL_FAISS_INDEX, GLOBAL_ID_MAP
@@ -510,6 +518,13 @@ async def clear_single_embedding( background_tasks: BackgroundTasks,user_id: int
         finally:
             logging.warning("Released FAISS_LOCK after single embedding clear attempt.")
 
+@app.get("/health", include_in_schema=False)
+async def health_check():
+    """
+    Health check endpoint to verify if the service is running.
+    """
+    return {"status": "ok", "message": "Face Recognition API is running."}
+
 # To run the application:
 # python -m venv venv
 # face_env\Scripts\activate
@@ -518,3 +533,4 @@ async def clear_single_embedding( background_tasks: BackgroundTasks,user_id: int
 # pip install --upgrade pip
 # pip install fastapi uvicorn[standard] sqlalchemy python-multipart opencv-python faiss-cpu pydantic python-dotenv deepface tensorflow==2.13.0 numpy==1.26.4 typing-extensions==4.12.2
 # uvicorn app:app --reload --port 8000
+# uvicorn app:app --reload --host 0.0.0.0 --port 8000
