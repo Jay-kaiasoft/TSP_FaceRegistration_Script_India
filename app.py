@@ -381,12 +381,20 @@ async def login(
                     logging.warning(f"FAISS matched ID {best_faiss_id}, but no mapping found in GLOBAL_ID_MAP. Index/map might be corrupted. Rebuild recommended.")
 
         # If we reach here, no sufficient match was found or data was inconsistent
-        detail_message = "Face not recognized. Please ensure you are registered or try again with a clearer image."
+        detail_message = "Face not clear. Adjust position and retry"
+        # if best_faiss_id != -1:
+        #     detail_message += f" (Closest match L2 distance: {best_distance:.4f} which is >= Threshold: {FACE_MATCH_THRESHOLD:.4f})"
+        #     detail_message
+        # else:
+        #     detail_message += " No close match found."
+
         if best_faiss_id != -1:
-            detail_message += f" (Closest match L2 distance: {best_distance:.4f} which is >= Threshold: {FACE_MATCH_THRESHOLD:.4f})"
+            logging.info(f"Login failed. Closest match L2 distance: {best_distance:.4f} (>= {FACE_MATCH_THRESHOLD:.4f})")
+            detail_message = "Face not clear. Adjust position and retry."
         else:
-             detail_message += " (No close match found in the database.)"
-        
+            logging.info("Login failed. No close match found in database.")
+            detail_message = "No match found. Please register first."
+
         logging.info(f"Login failed. {detail_message}")
         raise HTTPException(status_code=401, detail=detail_message)
 
