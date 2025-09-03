@@ -526,7 +526,7 @@ async def clear_single_embedding( background_tasks: BackgroundTasks,user_id: int
         finally:
             logging.warning("Released FAISS_LOCK after single embedding clear attempt.")
 
-@app.get("/health", include_in_schema=False)
+@app.get("/test", include_in_schema=False)
 async def health_check():
     """
     Health check endpoint to verify if the service is running.
