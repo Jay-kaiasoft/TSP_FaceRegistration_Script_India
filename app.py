@@ -51,8 +51,8 @@ app = FastAPI(title="Face Recognition API", description="API for face recognitio
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # must be False to allow "*" as origin
+    allow_origins=["capacitor://localhost","http://localhost", "https://localhost", "http://localhost:3000","https://devwebapp.calcsalary.com"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
