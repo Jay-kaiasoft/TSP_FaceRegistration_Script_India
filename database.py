@@ -9,6 +9,7 @@ load_dotenv()
 
 # Use DATABASE_URL_PROD if ENV=prod, else DATABASE_URL (local/dev)
 ENV = os.getenv("ENV", "local").lower()
+print("============ ENV ================"+ENV)
 if ENV == "prod":
     SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL_PROD")
 else:

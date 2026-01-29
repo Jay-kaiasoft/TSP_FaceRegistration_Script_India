@@ -41,20 +41,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 app = FastAPI(title="Face Recognition API", description="API for face recognition login and registration.")
 
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # or specify domains
-#     allow_credentials=True,
-#     allow_methods=["*"],  # or ["DELETE", "OPTIONS"]
-#     allow_headers=["*"],
-# )
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["capacitor://localhost","http://localhost", "https://localhost", "http://localhost:3000","https://devwebapp.calcsalary.com"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],       # ✅ Allow all origins
+    allow_credentials=True,    # ✅ Allow cookies/auth headers
+    allow_methods=["*"],       # ✅ Allow all HTTP methods
+    allow_headers=["*"],       # ✅ Allow all headers
 )
 
 # --- Helper Functions ---
