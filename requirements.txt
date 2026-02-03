@@ -8,10 +8,10 @@ numpy # DeepFace and FAISS depend on numpy
 pydantic # Core dependency for FastAPI data validation
 python-dotenv # For loading environment variables from .env files
 deepface # Ensure this version is compatible with your Python and TF/Torch setup
-tensorflow-cpu # Use tensorflow-cpu if you don't need GPU support
+# tensorflow-cpu # Use tensorflow-cpu if you don't need GPU support
 mysql-connector-python
 tf-keras
-
+insightface==0.7.3
 # fastapi
 # uvicorn[standard]
 # sqlalchemy

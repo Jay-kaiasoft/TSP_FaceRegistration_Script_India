@@ -1,21 +1,4 @@
 import os
-# Suppress TensorFlow warnings and optimize memory usage
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress INFO, WARNING, and ERROR messages
-os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
-os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-
-# Configure TensorFlow to use CPU only (reduces memory overhead)
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU, use CPU only
-
-# Set memory limits for TensorFlow
-import tensorflow as tf
-tf.config.set_soft_device_placement(True)
-
-# Limit CPU threads to reduce memory usage
-tf.config.threading.set_intra_op_parallelism_threads(1)
-tf.config.threading.set_inter_op_parallelism_threads(1)
-
-# Now import the rest of your modules
 import faiss
 import numpy as np
 import json
@@ -24,6 +7,7 @@ import time
 from typing import List, Dict, Optional
 from threading import Lock
 from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -36,9 +20,7 @@ from db.employees import CompanyEmployee
 from db.company import Company
 
 # --- Configuration ---
-# EMBEDDING_DIM = 512 # ArcFace default is 512
-EMBEDDING_DIM = 128  # Smaller embedding size for lighter models
-FACE_MODEL = "Facenet"  # or "OpenFace", "VGG-Face", "Facenet512"
+EMBEDDING_DIM = 512 # ArcFace default is 512
 # Adjust this value based on your testing and observed L2 distances for same faces.
 # Common range for L2 normalized ArcFace embeddings is 0.8 to 1.2 for same person.
 FACE_MATCH_THRESHOLD = 0.8 # Adjusted threshold for better accuracy with L2 normalized ArcFace
@@ -81,7 +63,6 @@ def validate_image(image_bytes: bytes):
     except Exception as e:
         logging.error(f"Image validation error: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Invalid image file: {e}")
-    
 
 def get_embedding(image_np: np.ndarray) -> List[float]:
     """
@@ -89,24 +70,11 @@ def get_embedding(image_np: np.ndarray) -> List[float]:
     Returns a normalized embedding list. Raises HTTPException on failure.
     """
     try:
-        # Optimize image size before processing
-        # Resize to reduce memory usage (ArcFace works well with 112x112)
-        height, width = image_np.shape[:2]
-        if height > 640 or width > 640:
-            # Maintain aspect ratio
-            scale = 640 / max(height, width)
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            image_np = cv2.resize(image_np, (new_width, new_height), 
-                                 interpolation=cv2.INTER_AREA)
-        
-          # Use Facenet which is lighter than ArcFace
+        # Generate embedding using DeepFace (ArcFace model)
         embedding_objs = DeepFace.represent(
             img_path=image_np,
-            model_name=FACE_MODEL,  # Use configured model
-            enforce_detection=True,
-            detector_backend='opencv',  # Lightweight detector
-            align=False
+            model_name="ArcFace",
+            enforce_detection=True  # ensures face must be present
         )
 
         if not embedding_objs:
@@ -135,7 +103,9 @@ def get_embedding(image_np: np.ndarray) -> List[float]:
             detail=f"Error generating face embedding: {str(e)}"
         )
 
+
 # --- FAISS Index Management ---
+
 def initialize_faiss_index(db: Session):
     """
     Initializes or reloads the FAISS index and its associated ID map.
@@ -148,88 +118,55 @@ def initialize_faiss_index(db: Session):
     with FAISS_LOCK:
         logging.info("Acquired FAISS_LOCK for initialization.")
         loaded_successfully = False
-        
-        # FIRST: Check if the index file exists
         if os.path.exists(FAISS_INDEX_FILE) and os.path.exists(ID_MAP_FILE):
             try:
                 logging.info(f"Attempting to load FAISS index from {FAISS_INDEX_FILE} and ID map from {ID_MAP_FILE}...")
-                
-                # Try to load the index
                 GLOBAL_FAISS_INDEX = faiss.read_index(FAISS_INDEX_FILE)
                 assert GLOBAL_FAISS_INDEX is not None, "faiss.read_index returned None unexpectedly."
+
+                with open(ID_MAP_FILE, 'r') as f:
+                    temp_map = json.load(f)
+                    GLOBAL_ID_MAP = {int(k): v for k, v in temp_map.items()}
                 
-                # Check if loaded index has the right dimension
-                if GLOBAL_FAISS_INDEX.d != EMBEDDING_DIM:
-                    logging.warning(f"FAISS index dimension mismatch! Loaded: {GLOBAL_FAISS_INDEX.d}, Expected: {EMBEDDING_DIM}. Creating new index.")
-                    
-                    # Close the old index and create new one
-                    GLOBAL_FAISS_INDEX = None
-                    GLOBAL_ID_MAP = {}
-                    
-                    # Remove old files
-                    try:
-                        os.remove(FAISS_INDEX_FILE)
-                        os.remove(ID_MAP_FILE)
-                        logging.info("Removed old dimension-mismatched FAISS index files.")
-                    except:
-                        pass
-                    
-                    # Set flag to create new index
-                    loaded_successfully = False
-                else:
-                    # Dimensions match, load ID map
-                    with open(ID_MAP_FILE, 'r') as f:
-                        temp_map = json.load(f)
-                        GLOBAL_ID_MAP = {int(k): v for k, v in temp_map.items()}
-                    
-                    logging.info(f"Loaded FAISS index with {GLOBAL_FAISS_INDEX.ntotal} vectors and ID map with {len(GLOBAL_ID_MAP)} entries.")
-                    loaded_successfully = True
-                    
+                logging.info(f"Loaded FAISS index with {GLOBAL_FAISS_INDEX.ntotal} vectors and ID map with {len(GLOBAL_ID_MAP)} entries.")
+                loaded_successfully = True
             except Exception as e:
                 logging.error(f"Error loading FAISS index or ID map: {e}. Will attempt to rebuild from database.", exc_info=True)
-                GLOBAL_FAISS_INDEX = None
+                GLOBAL_FAISS_INDEX = None # Ensure it's None for rebuilding
                 GLOBAL_ID_MAP = {}
         
-        # If not loaded successfully, create new index
         if not loaded_successfully:
             logging.info("Initializing new FAISS index and populating from database...")
-            
-            # Initialize a new HNSW index with the NEW embedding dimension
+            # Initialize a new HNSW index (Hierarchical Navigable Small World)
+            # This index type is suitable for approximate nearest neighbor search.
             GLOBAL_FAISS_INDEX = faiss.IndexHNSWFlat(EMBEDDING_DIM, 32, faiss.METRIC_L2)
+            # Parameters for HNSW for construction and search efficiency/accuracy
             GLOBAL_FAISS_INDEX.hnsw.efConstruction = 100
             GLOBAL_FAISS_INDEX.hnsw.efSearch = 50
 
-            # Populate index from database - but ONLY if embeddings have the right dimension
+            # Populate index from database
             users = db.query(CompanyEmployee).all()
             if users:
                 embeddings_to_add = []
                 user_ids_to_map = [] 
                 for user in users:
-                    if user.embedding is not None:
-                        # Check if embedding has the right dimension
-                        if len(user.embedding) == EMBEDDING_DIM:
-                            embeddings_to_add.append(np.array(user.embedding, dtype='float32'))
-                            user_ids_to_map.append(user.id)
-                        else:
-                            logging.warning(f"User {user.id} has embedding with wrong dimension {len(user.embedding)}. Skipping.")
-                            # Optionally: Clear the old embedding
-                            # setattr(user, "embedding", None)
-                            # db.commit()
+                    # Ensure embedding from DB is correctly converted to numpy float32
+                    embeddings_to_add.append(np.array(user.embedding, dtype='float32'))
+                    user_ids_to_map.append(user.id) 
+
+                embeddings_matrix = np.array(embeddings_to_add).astype('float32')
                 
-                if embeddings_to_add:
-                    embeddings_matrix = np.array(embeddings_to_add).astype('float32')
-                    GLOBAL_FAISS_INDEX.add(embeddings_matrix)
-                    
-                    # Populate GLOBAL_ID_MAP after adding to FAISS
-                    for i, db_id in enumerate(user_ids_to_map):
-                        GLOBAL_ID_MAP[i] = db_id
-                    
-                    logging.info(f"Rebuilt FAISS index with {GLOBAL_FAISS_INDEX.ntotal} vectors from DB.")
-                else:
-                    logging.info("No valid embeddings in DB (all have wrong dimension). FAISS index initialized empty.")
+                assert GLOBAL_FAISS_INDEX is not None, "FAISS index should be initialized here before adding vectors."
+                GLOBAL_FAISS_INDEX.add(embeddings_matrix) # type: ignore # Suppress Pylance for faiss.add args
+
+                # Populate GLOBAL_ID_MAP after adding to FAISS
+                # FAISS assigns sequential IDs 0, 1, 2... based on the order of addition
+                for i, db_id in enumerate(user_ids_to_map):
+                    GLOBAL_ID_MAP[i] = db_id 
+
+                logging.info(f"Rebuilt FAISS index with {GLOBAL_FAISS_INDEX.ntotal} vectors from DB.")
             else:
                 logging.info("No users in DB. FAISS index initialized empty.")
-        
         logging.info("Released FAISS_LOCK after initialization.")
         
 def save_faiss_index():
